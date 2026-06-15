@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="YT Player" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <title>YT Playlist Player</title>
+
+  <style>
+    /* ── Design tokens ────────────────────────────────────── */
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #13131c;
+      --border:    #1e1e2e;
+      --accent:    #7c3aed;
+      --accent2:   #a855f7;
+      --glow:      rgba(124, 58, 237, 0.35);
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --error:     #f87171;
+      --success:   #34d399;
+
+      --font-display: 'SF Pro Display', -apple-system, 'Helvetica Neue', sans-serif;
+      --font-body:    'SF Pro Text',    -apple-system, 'Helvetica Neue', sans-serif;
+
+      --radius-sm: 8px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-full: 9999px;
+
+      --safe-top:    env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    /* ── Reset ────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+      user-select: none;
+    }
+
+    /* ── Layout ───────────────────────────────────────────── */
+    .app {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding:
+        calc(var(--safe-top) + 24px)
+        20px
+        calc(var(--safe-bottom) + 24px);
+      gap: 0;
+    }
+
+    /* ── Setup screen ─────────────────────────────────────── */
+    #setup-screen {
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding-top: 16px;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-icon svg { width: 22px; height: 22px; fill: #fff; }
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text);
+    }
+    .logo-text span { color: var(--accent2); }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    /* Input fields */
+    .field-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    input[type="text"], input[type="url"] {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      font-size: 14px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+      font-family: var(--font-body);
+    }
+    input[type="text"]:focus, input[type="url"]:focus {
+      border-color: var(--accent);
+    }
+    input::placeholder { color: var(--muted); }
+
+    .btn-fetch {
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+      font-family: var(--font-body);
+    }
+    .btn-fetch:active { opacity: 0.75; }
+    .btn-fetch:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Backend URL field */
+    .backend-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .backend-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .backend-row input {
+      background: transparent;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+    }
+    .backend-row input:focus { border: none; }
+
+    /* Track list */
+    #track-list-wrap {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #track-list-wrap.visible { display: flex; }
+
+    .track-count {
+      font-size: 12px;
+      color: var(--muted);
+      padding-left: 2px;
+    }
+
+    .track-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .track-list::-webkit-scrollbar { width: 4px; }
+    .track-list::-webkit-scrollbar-track { background: transparent; }
+    .track-list::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: var(--radius-full);
+    }
+
+    .track-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+      cursor: pointer;
+    }
+    .track-item:last-child { border-bottom: none; }
+    .track-item:active { background: rgba(124,58,237,0.08); }
+    .track-item.active { background: rgba(124,58,237,0.15); }
+
+    .track-num {
+      font-size: 11px;
+      color: var(--muted);
+      width: 20px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .track-item.active .track-num { color: var(--accent2); }
+
+    .track-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 4px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--border);
+    }
+    .track-info { flex: 1; min-width: 0; }
+    .track-title {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .track-duration {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .track-play-icon {
+      width: 20px;
+      height: 20px;
+      opacity: 0;
+      flex-shrink: 0;
+      color: var(--accent2);
+    }
+    .track-item.active .track-play-icon { opacity: 1; }
+
+    /* ── Player screen ────────────────────────────────────── */
+    #player-screen {
+      display: none;
+      width: 100%;
+      max-width: 420px;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+    #player-screen.visible {
+      display: flex;
+    }
+
+    /* Waveform ambient art */
+    .ambient-art {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      max-width: 320px;
+      margin: 0 auto 32px;
+    }
+    .album-art {
+      width: 100%;
+      height: 100%;
+      border-radius: var(--radius-lg);
+      object-fit: cover;
+      background: var(--surface);
+      display: block;
+      box-shadow: 0 0 60px var(--glow), 0 32px 64px rgba(0,0,0,0.5);
+      transition: transform 0.3s ease;
+    }
+    .album-art-placeholder {
+      width: 100%;
+      height: 100%;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 60px var(--glow), 0 32px 64px rgba(0,0,0,0.5);
+    }
+    .album-art-placeholder svg { width: 64px; height: 64px; opacity: 0.3; fill: var(--text); }
+
+    /* Pulse ring — signature animation */
+    .pulse-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: calc(var(--radius-lg) + 8px);
+      border: 2px solid var(--accent);
+      opacity: 0;
+      pointer-events: none;
+    }
+    @keyframes pulse-out {
+      0%   { opacity: 0.6; transform: scale(1); }
+      100% { opacity: 0;   transform: scale(1.06); }
+    }
+    .playing .pulse-ring {
+      animation: pulse-out 2s ease-out infinite;
+    }
+    .playing .album-art,
+    .playing .album-art-placeholder {
+      transform: scale(1.015);
+    }
+
+    /* Track meta */
+    .track-meta {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 20px;
+    }
+    .now-playing-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent2);
+    }
+    .now-playing-title {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      color: var(--text);
+    }
+    .now-playing-index {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Progress */
+    .progress-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 28px;
+    }
+    .progress-bar-bg {
+      width: 100%;
+      height: 4px;
+      border-radius: var(--radius-full);
+      background: var(--border);
+      position: relative;
+      cursor: pointer;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: var(--radius-full);
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      width: 0%;
+      transition: width 0.5s linear;
+      pointer-events: none;
+    }
+    .progress-times {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      width: 100%;
+      margin-bottom: 32px;
+    }
+
+    .ctrl-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: var(--radius-full);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s, transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ctrl-btn:active { transform: scale(0.9); opacity: 0.7; }
+    .ctrl-btn svg { width: 28px; height: 28px; fill: currentColor; }
+    .ctrl-btn.muted { color: var(--muted); }
+
+    /* Big play/pause */
+    .play-btn-big {
+      width: 72px;
+      height: 72px;
+      border-radius: var(--radius-full);
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 32px var(--glow);
+      transition: transform 0.1s, box-shadow 0.2s;
+      -webkit-tap-highlight-color: transparent;
+      flex-shrink: 0;
+    }
+    .play-btn-big:active { transform: scale(0.93); box-shadow: 0 0 16px var(--glow); }
+    .play-btn-big svg { width: 32px; height: 32px; fill: #fff; }
+
+    /* Back to playlist */
+    .back-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-full);
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      -webkit-tap-highlight-color: transparent;
+      transition: border-color 0.15s;
+    }
+    .back-btn:active { border-color: var(--accent); color: var(--text); }
+    .back-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+    /* ── Hidden iframe ────────────────────────────────────── */
+    #yt-iframe { display: none; }
+
+    /* ── Status / Toast ───────────────────────────────────── */
+    #status-toast {
+      position: fixed;
+      bottom: calc(var(--safe-bottom) + 20px);
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-full);
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      pointer-events: none;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+      opacity: 0;
+      white-space: nowrap;
+      z-index: 999;
+      max-width: 90vw;
+    }
+    #status-toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+    #status-toast.error { border-color: var(--error); color: var(--error); }
+    #status-toast.success { border-color: var(--success); color: var(--success); }
+
+    /* ── Loading spinner ──────────────────────────────────── */
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent2);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Divider ──────────────────────────────────────────── */
+    .divider {
+      width: 100%;
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+    }
+
+    /* ── Responsive tweaks ───────────────────────────────── */
+    @media (max-height: 700px) {
+      .ambient-art { max-width: 240px; margin-bottom: 20px; }
+      .now-playing-title { font-size: 18px; }
+      .play-btn-big { width: 64px; height: 64px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-ring { animation: none !important; }
+      .progress-bar-fill { transition: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ══ SETUP SCREEN ══════════════════════════════════════════ -->
+  <div id="setup-screen">
+
+    <div class="logo-row">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm-1.5 5.5l5 3.5-5 3.5V8.5z"/></svg>
+      </div>
+      <span class="logo-text">YT Playlist <span>Player</span></span>
+    </div>
+
+    <!-- Backend URL -->
+    <div class="field-wrap">
+      <div class="section-label">バックエンド URL（Render）</div>
+      <div class="backend-row">
+        <span class="backend-label">API エンドポイント</span>
+        <input type="url" id="backend-url"
+          placeholder="https://your-app.onrender.com"
+          value="" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      </div>
+    </div>
+
+    <!-- Playlist URL -->
+    <div class="field-wrap">
+      <div class="section-label">YouTube プレイリスト</div>
+      <div class="input-row">
+        <input type="url" id="playlist-url"
+          placeholder="https://www.youtube.com/playlist?list=..."
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        <button class="btn-fetch" id="fetch-btn" onclick="fetchPlaylist()">取得</button>
+      </div>
+    </div>
+
+    <!-- Track list -->
+    <div id="track-list-wrap">
+      <div class="section-label">
+        トラック一覧
+        <span class="track-count" id="track-count"></span>
+      </div>
+      <div class="track-list" id="track-list"></div>
+      <button class="play-btn-big" id="start-btn" onclick="startPlayback(0)"
+        style="width:100%;border-radius:var(--radius-md);height:56px;font-size:15px;font-weight:700;gap:10px;flex-direction:row;">
+        <svg viewBox="0 0 24 24" style="width:24px;height:24px;"><path d="M8 5v14l11-7z"/></svg>
+        再生を開始する
+      </button>
+    </div>
+
+  </div><!-- /setup-screen -->
+
+
+  <!-- ══ PLAYER SCREEN ══════════════════════════════════════════ -->
+  <div id="player-screen">
+
+    <div class="ambient-art" id="art-wrap">
+      <div class="pulse-ring" id="pulse-ring"></div>
+      <div class="album-art-placeholder" id="art-placeholder">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18A9 9 0 0 0 12 3zm-1.5 5.5l5 3.5-5 3.5V8.5z"/></svg>
+      </div>
+      <img class="album-art" id="album-art" src="" alt="" style="display:none;" />
+    </div>
+
+    <div class="track-meta" style="width:100%;max-width:320px;">
+      <span class="now-playing-label">再生中</span>
+      <div class="now-playing-title" id="now-title">—</div>
+      <div class="now-playing-index" id="now-index"></div>
+    </div>
+
+    <div class="progress-wrap" style="max-width:320px;">
+      <div class="progress-bar-bg" id="progress-bg" onclick="seekTo(event)">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-times">
+        <span id="time-current">0:00</span>
+        <span id="time-total">0:00</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="ctrl-btn" id="btn-prev" onclick="prevTrack()" title="前へ">
+        <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button class="play-btn-big" id="main-play-btn" onclick="togglePlay()">
+        <svg id="icon-play"  viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" viewBox="0 0 24 24" style="display:none;"><path d="M6 19h4V5H6zm8-14v14h4V5z"/></svg>
+      </button>
+      <button class="ctrl-btn" id="btn-next" onclick="nextTrack()" title="次へ">
+        <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6zm2.5-6L15 6v12z"/></svg>
+      </button>
+    </div>
+
+    <button class="back-btn" onclick="showSetup()">
+      <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+      プレイリストに戻る
+    </button>
+
+  </div><!-- /player-screen -->
+
+</div><!-- /app -->
+
+<!-- Hidden YT iframe (required for IFrame API) -->
+<div id="yt-iframe"></div>
+
+<!-- Toast -->
+<div id="status-toast"></div>
+
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   State
+═══════════════════════════════════════════════════════════════ */
+let playlist   = [];   // [{title, videoId, thumbnail, duration}]
+let currentIdx = 0;
+let player     = null; // YT.Player
+let isPlaying  = false;
+let progressTimer = null;
+let mediaSessionActive = false;
+
+const BACKEND_KEY  = 'yt_pwa_backend';
+const PLAYLIST_KEY = 'yt_pwa_playlist';
+const LAST_URL_KEY = 'yt_pwa_last_url';
+
+/* ═══════════════════════════════════════════════════════════════
+   Init
+═══════════════════════════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded', () => {
+  // Restore saved values
+  const savedBackend  = localStorage.getItem(BACKEND_KEY);
+  const savedUrl      = localStorage.getItem(LAST_URL_KEY);
+  const savedPlaylist = localStorage.getItem(PLAYLIST_KEY);
+
+  if (savedBackend)  document.getElementById('backend-url').value  = savedBackend;
+  if (savedUrl)      document.getElementById('playlist-url').value = savedUrl;
+  if (savedPlaylist) {
+    try {
+      playlist = JSON.parse(savedPlaylist);
+      renderTrackList();
+    } catch(e) {}
+  }
+
+  // Register Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   Fetch playlist from backend
+═══════════════════════════════════════════════════════════════ */
+async function fetchPlaylist() {
+  const backendUrl = document.getElementById('backend-url').value.trim().replace(/\/$/, '');
+  const plUrl      = document.getElementById('playlist-url').value.trim();
+
+  if (!backendUrl) { showToast('バックエンド URL を入力してください', 'error'); return; }
+  if (!plUrl)      { showToast('プレイリスト URL を入力してください', 'error'); return; }
+
+  localStorage.setItem(BACKEND_KEY,  backendUrl);
+  localStorage.setItem(LAST_URL_KEY, plUrl);
+
+  const btn = document.getElementById('fetch-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    const res  = await fetch(`${backendUrl}/api/playlist?url=${encodeURIComponent(plUrl)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'サーバーエラー');
+
+    playlist = data.tracks;
+    localStorage.setItem(PLAYLIST_KEY, JSON.stringify(playlist));
+    renderTrackList();
+    showToast(`${playlist.length} 曲を取得しました`, 'success');
+  } catch (err) {
+    showToast('取得失敗: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '取得';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Render track list
+═══════════════════════════════════════════════════════════════ */
+function renderTrackList() {
+  const wrap = document.getElementById('track-list-wrap');
+  const list = document.getElementById('track-list');
+  const cnt  = document.getElementById('track-count');
+
+  if (!playlist.length) { wrap.classList.remove('visible'); return; }
+
+  cnt.textContent = `— ${playlist.length} 曲`;
+  wrap.classList.add('visible');
+
+  list.innerHTML = playlist.map((t, i) => `
+    <div class="track-item" id="track-item-${i}" onclick="startPlayback(${i})">
+      <span class="track-num">${i + 1}</span>
+      <img class="track-thumb" src="${t.thumbnail}" loading="lazy" onerror="this.style.opacity=0" />
+      <div class="track-info">
+        <div class="track-title">${escHtml(t.title)}</div>
+        <div class="track-duration">${formatDuration(t.duration)}</div>
+      </div>
+      <svg class="track-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+    </div>
+  `).join('');
+}
+
+function updateTrackHighlight(idx) {
+  document.querySelectorAll('.track-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   YouTube IFrame API
+═══════════════════════════════════════════════════════════════ */
+function loadYTApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  return new Promise(resolve => {
+    window.onYouTubeIframeAPIReady = resolve;
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  });
+}
+
+async function startPlayback(idx) {
+  showPlayerScreen();
+  currentIdx = idx;
+  updateTrackHighlight(idx);
+
+  await loadYTApi();
+
+  const videoId = playlist[idx].videoId;
+
+  if (player) {
+    player.loadVideoById(videoId);
+    setPlaying(true);
+    updateNowPlaying();
+    return;
+  }
+
+  const div = document.createElement('div');
+  div.id = 'yt-player-div';
+  document.getElementById('yt-iframe').appendChild(div);
+
+  player = new YT.Player('yt-player-div', {
+    videoId,
+    playerVars: {
+      autoplay:       1,
+      controls:       0,
+      playsinline:    1,
+      rel:            0,
+      modestbranding: 1,
+      iv_load_policy: 3,
+    },
+    events: {
+      onReady:       onPlayerReady,
+      onStateChange: onPlayerStateChange,
+      onError:       onPlayerError,
+    },
+  });
+}
+
+function onPlayerReady(e) {
+  e.target.setVolume(100);
+  e.target.playVideo();
+  setPlaying(true);
+  updateNowPlaying();
+  setupMediaSession();
+  startProgressTimer();
+}
+
+function onPlayerStateChange(e) {
+  if (e.data === YT.PlayerState.ENDED) {
+    nextTrack();
+  } else if (e.data === YT.PlayerState.PLAYING) {
+    setPlaying(true);
+    startProgressTimer();
+  } else if (e.data === YT.PlayerState.PAUSED) {
+    setPlaying(false);
+    stopProgressTimer();
+  }
+}
+
+function onPlayerError(e) {
+  showToast('再生エラー (code ' + e.data + ')。次の曲へ…', 'error');
+  setTimeout(() => nextTrack(), 2000);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Playback controls
+═══════════════════════════════════════════════════════════════ */
+function togglePlay() {
+  if (!player) return;
+  if (isPlaying) {
+    player.pauseVideo();
+  } else {
+    player.playVideo();
+  }
+}
+
+function nextTrack() {
+  if (!playlist.length) return;
+  currentIdx = (currentIdx + 1) % playlist.length;
+  startPlayback(currentIdx);
+}
+
+function prevTrack() {
+  if (!player) return;
+  const t = player.getCurrentTime();
+  if (t > 3) {
+    player.seekTo(0, true);
+    return;
+  }
+  currentIdx = (currentIdx - 1 + playlist.length) % playlist.length;
+  startPlayback(currentIdx);
+}
+
+function seekTo(e) {
+  if (!player) return;
+  const bg   = document.getElementById('progress-bg');
+  const rect = bg.getBoundingClientRect();
+  const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const dur  = player.getDuration();
+  player.seekTo(pct * dur, true);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UI state helpers
+═══════════════════════════════════════════════════════════════ */
+function setPlaying(flag) {
+  isPlaying = flag;
+
+  const iconPlay  = document.getElementById('icon-play');
+  const iconPause = document.getElementById('icon-pause');
+  const artWrap   = document.getElementById('art-wrap');
+
+  iconPlay.style.display  = flag ? 'none'  : 'block';
+  iconPause.style.display = flag ? 'block' : 'none';
+  artWrap.classList.toggle('playing', flag);
+
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = flag ? 'playing' : 'paused';
+  }
+}
+
+function updateNowPlaying() {
+  const t = playlist[currentIdx];
+  if (!t) return;
+
+  document.getElementById('now-title').textContent = t.title;
+  document.getElementById('now-index').textContent =
+    `${currentIdx + 1} / ${playlist.length}`;
+
+  // Album art
+  const img  = document.getElementById('album-art');
+  const ph   = document.getElementById('art-placeholder');
+  if (t.thumbnail) {
+    img.src = t.thumbnail;
+    img.onload = () => { img.style.display = 'block'; ph.style.display = 'none'; };
+    img.onerror = () => { img.style.display = 'none'; ph.style.display = 'flex'; };
+  } else {
+    img.style.display = 'none';
+    ph.style.display  = 'flex';
+  }
+
+  updateTrackHighlight(currentIdx);
+  updateMediaSessionMeta();
+}
+
+function showPlayerScreen() {
+  document.getElementById('setup-screen').style.display = 'none';
+  const ps = document.getElementById('player-screen');
+  ps.classList.add('visible');
+}
+
+function showSetup() {
+  document.getElementById('player-screen').classList.remove('visible');
+  document.getElementById('setup-screen').style.display = '';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Progress timer
+═══════════════════════════════════════════════════════════════ */
+function startProgressTimer() {
+  stopProgressTimer();
+  progressTimer = setInterval(updateProgress, 1000);
+}
+function stopProgressTimer() {
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+}
+function updateProgress() {
+  if (!player || !player.getDuration) return;
+  const cur  = player.getCurrentTime() || 0;
+  const dur  = player.getDuration()    || 0;
+  const pct  = dur ? (cur / dur) * 100 : 0;
+
+  document.getElementById('progress-fill').style.width  = pct + '%';
+  document.getElementById('time-current').textContent   = formatTime(cur);
+  document.getElementById('time-total').textContent     = formatTime(dur);
+
+  if ('mediaSession' in navigator && dur) {
+    navigator.mediaSession.setPositionState({
+      duration:     dur,
+      playbackRate: 1,
+      position:     cur,
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Media Session API
+═══════════════════════════════════════════════════════════════ */
+function setupMediaSession() {
+  if (!('mediaSession' in navigator) || mediaSessionActive) return;
+  mediaSessionActive = true;
+
+  navigator.mediaSession.setActionHandler('play',         () => { player && player.playVideo(); });
+  navigator.mediaSession.setActionHandler('pause',        () => { player && player.pauseVideo(); });
+  navigator.mediaSession.setActionHandler('nexttrack',    () => nextTrack());
+  navigator.mediaSession.setActionHandler('previoustrack',() => prevTrack());
+  navigator.mediaSession.setActionHandler('seekto',       (d) => {
+    if (d.seekTime !== undefined && player) player.seekTo(d.seekTime, true);
+  });
+}
+
+function updateMediaSessionMeta() {
+  if (!('mediaSession' in navigator)) return;
+  const t = playlist[currentIdx];
+  if (!t) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title:  t.title,
+    artist: 'YouTube Playlist',
+    artwork: t.thumbnail ? [
+      { src: t.thumbnail, sizes: '480x360', type: 'image/jpeg' },
+    ] : [],
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Toast
+═══════════════════════════════════════════════════════════════ */
+let toastTimer = null;
+function showToast(msg, type = '') {
+  const el = document.getElementById('status-toast');
+  el.textContent = msg;
+  el.className = 'show' + (type ? ' ' + type : '');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 3000);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Helpers
+═══════════════════════════════════════════════════════════════ */
+function formatTime(s) {
+  s = Math.floor(s || 0);
+  const m = Math.floor(s / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return `${m}:${sec}`;
+}
+
+function formatDuration(s) {
+  if (!s) return '';
+  return formatTime(s);
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+
+
+</body>
+</html>
