@@ -519,8 +519,7 @@
     }
 
     /* ── PiP hidden canvas & video ────────────────────────── */
-    #pip-canvas,
-    #pip-video {
+    #pip-canvas {
       position: absolute;
       top: -9999px;
       left: -9999px;
@@ -528,6 +527,19 @@
       height: 512px;
       opacity: 0;
       pointer-events: none;
+    }
+    /* iOS Safari requires the video to be visible (non-zero size,
+       not display:none, not visibility:hidden) to allow PiP.
+       We place it off-screen but keep it "technically visible". */
+    #pip-video {
+      position: fixed;
+      bottom: 0;
+      right: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0.01;
+      pointer-events: none;
+      z-index: -1;
     }
 
     /* ── Responsive tweaks ───────────────────────────────── */
@@ -724,15 +736,36 @@ window.addEventListener('DOMContentLoaded', () => {
   pipCtx    = pipCanvas.getContext('2d');
   pipVideo  = document.getElementById('pip-video');
 
-  // Guard: hide PiP button if not supported
-  if (!document.pictureInPictureEnabled) {
+  // Detect iOS Safari (captureStream is broken on iOS WebKit)
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  // Feature-detect: standard PiP (Chrome/Firefox) vs webkit PiP (iOS Safari)
+  const supportsStandardPiP = !!document.pictureInPictureEnabled;
+  const supportsWebkitPiP   = typeof pipVideo.webkitSupportsPresentationMode === 'boolean'
+                               && pipVideo.webkitSupportsPresentationMode
+                               && typeof pipVideo.webkitSetPresentationMode === 'function';
+
+  window._pipIsIOS          = isIOS;
+  window._supportsStandardPiP = supportsStandardPiP;
+  window._supportsWebkitPiP   = supportsWebkitPiP;
+
+  // Hide button only if NEITHER method is supported
+  if (!supportsStandardPiP && !supportsWebkitPiP) {
     const btn = document.getElementById('pip-btn');
     if (btn) btn.style.display = 'none';
   }
 
-  // Listen for PiP window close to stop animation loop
+  // Listen for PiP window close (standard API)
   pipVideo.addEventListener('leavepictureinpicture', () => {
     stopPipLoop();
+  });
+
+  // Listen for webkit presentation mode change (iOS Safari)
+  pipVideo.addEventListener('webkitpresentationmodechanged', () => {
+    if (pipVideo.webkitPresentationMode !== 'picture-in-picture') {
+      stopPipLoop();
+    }
   });
 });
 
@@ -1314,52 +1347,125 @@ function stopPipLoop() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   PiP — open
+   PiP — open  (iOS Safari / Standard W3C 両対応)
 ═══════════════════════════════════════════════════════════════ */
 async function openPiP() {
-  // Guard: browser support
-  if (!document.pictureInPictureEnabled) {
+  const supportsStandard = window._supportsStandardPiP;
+  const supportsWebkit   = window._supportsWebkitPiP;
+
+  if (!supportsStandard && !supportsWebkit) {
     showToast('このブラウザは PiP に対応していません', 'error');
     return;
   }
 
-  // If already in PiP, just exit (toggle)
-  if (document.pictureInPictureElement) {
-    await document.exitPictureInPicture();
-    return;
-  }
-
   const btn = document.getElementById('pip-btn');
-  if (btn) { btn.disabled = true; }
+  if (btn) btn.disabled = true;
 
   try {
-    // Load current track's thumbnail
+    // ── iOS Safari ルート ─────────────────────────────────────
+    // iOS WebKit は canvas.captureStream() が動作しないため、
+    // YouTube IFrame 内の <video> 要素を直接 PiP にする。
+    if (supportsWebkit && !supportsStandard) {
+      await openPiP_iOS();
+      return;
+    }
+
+    // ── 標準 W3C ルート (Chrome / Firefox / macOS Safari) ─────
+    // Toggle off if already in PiP
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      return;
+    }
+
+    // Load thumbnail for Canvas
     const t = playlist[currentIdx];
     if (t && t.thumbnail) pipLoadThumb(t.thumbnail);
 
-    // Draw an initial frame so the video has content before PiP opens
+    // Draw initial frame
     pipDrawFrame();
 
-    // Capture canvas as 30fps MediaStream
+    // captureStream → video.srcObject
     const stream = pipCanvas.captureStream(30);
     pipVideo.srcObject = stream;
-
-    // Must call play() before requestPictureInPicture (browser requirement)
     await pipVideo.play();
 
-    // Start the RAF animation loop
     startPipLoop();
-
-    // Open PiP
     await pipVideo.requestPictureInPicture();
-
     showToast('PiP 窓を開きました', 'success');
+
   } catch (err) {
     stopPipLoop();
     console.error('PiP error:', err);
-    showToast('PiP の起動に失敗しました: ' + (err.message || err), 'error');
+    showToast('PiP 起動失敗: ' + (err.message || String(err)), 'error');
   } finally {
-    if (btn) { btn.disabled = false; }
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PiP — iOS Safari 専用ルート
+   ---------------------------------------------------------------
+   iOS WebKit の制約:
+     - canvas.captureStream() は iOS では動作しない (WebKit Bug 181663)
+     - YouTube IFrame は cross-origin のため contentDocument にアクセス不可
+     - video.srcObject = MediaStream は iOS 12+ で対応しているが、
+       captureStream の出力が無効なため意味がない
+   ---------------------------------------------------------------
+   現実的な解決策:
+     最小限の有効な MP4 (1×1px, 無音, 1秒ループ) を base64 で
+     pip-video に割り当てて再生し、
+     webkitSetPresentationMode('picture-in-picture') を呼ぶ。
+     → PiP 窓が開き、その中に黒い映像(1px)が映る。
+       画面上にアプリが残るため「ながら聴き」が成立する。
+   ---------------------------------------------------------------
+   ※ iOS Safari の PiP は「動画を小窓に出しながら他アプリを使う」用途。
+     音声は YouTube IFrame が引き続き担当する。
+═══════════════════════════════════════════════════════════════ */
+
+// 最小の有効な MP4: 1x1px 黒フレーム 1秒 (RFC準拠、iOS Safariで再生可能)
+// ffmpegで生成した base64 encoded 1x1 H.264 MP4
+const TINY_MP4_B64 = 'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAV+bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAjt0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAIAAAACAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAGzbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABXm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAR5zdGJsAAAAunN0c2QAAAAAAAAAAQAAAKphdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAIAAgBIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAMGF2Y0MBQsAe/+EAGGdCwB7ZH4iIwEQAAAMABAAAAwAIPFi5IAEABWjLg8sgAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAFDAAABQwAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAoYAAAABAAAAFHN0Y28AAAAAAAAAAQAABcMAAAJtdHJhawAAAFx0a2hkAAAAAwAAAAAAAAAAAAAAAgAAAAAAAAPoAAAAAAAAAAAAAAABAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAJGVkdHMAAAAcZWxzdAAAAAAAAAABAAAD6AAABAAAAQAAAAAB5W1kaWEAAAAgbWRoZAAAAAAAAAAAAAAAAAAAH0AAACNAVcQAAAAAAC1oZGxyAAAAAAAAAABzb3VuAAAAAAAAAAAAAAAAU291bmRIYW5kbGVyAAAAAZBtaW5mAAAAEHNtaGQAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAVRzdGJsAAAAfnN0c2QAAAAAAAAAAQAAAG5tcDRhAAAAAAAAAAEAAAAAAAAAAAABABAAAAAAH0AAAAAAADZlc2RzAAAAAAOAgIAlAAIABICAgBdAFQAAAAAAH0AAAAF3BYCAgAUViFblAAaAgIABAgAAABRidHJ0AAAAAAAAH0AAAAF3AAAAIHN0dHMAAAAAAAAAAgAAAAgAAAQAAAAAAQAAA0AAAAAoc3RzYwAAAAAAAAACAAAAAQAAAAEAAAABAAAAAgAAAAgAAAABAAAAOHN0c3oAAAAAAAAAAAAAAAkAAAAVAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAYc3RjbwAAAAAAAAACAAAFrgAACEkAAAAac2dwZAEAAAByb2xsAAAAAgAAAAH//wAAABxzYmdwAAAAAHJvbGwAAAABAAAACQAAAAEAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYwLjE2LjEwMAAAAAhmcmVlAAACw21kYXTeAgBMYXZjNjAuMzEuMTAyAAIwQA4AAAJwBgX//2zcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY0IHIzMTA4IDMxZTE5ZjkgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDIzIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjB4MTExIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTAgd2VpZ2h0cD0wIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAADmWIhAV///8PRQABQt+AARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAc=';
+
+async function openPiP_iOS() {
+  // Toggle: すでに PiP モードなら inline に戻す
+  if (pipVideo.webkitPresentationMode === 'picture-in-picture') {
+    pipVideo.webkitSetPresentationMode('inline');
+    stopPipLoop();
+    return;
+  }
+
+  // pip-video にまだ src を割り当てていない場合はセット
+  if (!pipVideo.src || pipVideo.src === window.location.href) {
+    try {
+      // base64 → Blob → ObjectURL
+      const binary = atob(TINY_MP4_B64.replace(/\s/g, ''));
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob   = new Blob([bytes], { type: 'video/mp4' });
+      pipVideo.src = URL.createObjectURL(blob);
+      pipVideo.loop = true;
+    } catch(e) {
+      // fallback: data URI
+      pipVideo.src = 'data:video/mp4;base64,' + TINY_MP4_B64;
+      pipVideo.loop = true;
+    }
+  }
+
+  // play() してから PiP (iOS 要件)
+  try {
+    await pipVideo.play();
+  } catch(playErr) {
+    // autoplay blocked — ユーザーインタラクション内なので通常は通る
+    console.warn('pip-video play error:', playErr);
+  }
+
+  // webkit PiP に切り替え
+  if (typeof pipVideo.webkitSetPresentationMode === 'function'
+      && pipVideo.webkitSupportsPresentationMode) {
+    pipVideo.webkitSetPresentationMode('picture-in-picture');
+    showToast('PiP 窓を開きました', 'success');
+  } else {
+    showToast('お使いの iOS では PiP に対応していません', 'error');
   }
 }
 </script>
