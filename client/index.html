@@ -114,7 +114,7 @@
       gap: 8px;
       align-items: stretch;
     }
-    input[type="text"], input[type="url"] {
+    input[type="text"], input[type="https://yt-backend-hmam.onrender.com/"] {
       flex: 1;
       background: var(--surface);
       border: 1px solid var(--border);
@@ -127,7 +127,7 @@
       -webkit-appearance: none;
       font-family: var(--font-body);
     }
-    input[type="text"]:focus, input[type="https://yt-backend-hmam.onrender.com"]:focus {
+    input[type="text"]:focus, input[type="https://yt-backend-hmam.onrender.com/"]:focus {
       border-color: var(--accent);
     }
     input::placeholder { color: var(--muted); }
@@ -272,7 +272,7 @@
       width: 100%;
       aspect-ratio: 1 / 1;
       max-width: 320px;
-      margin: 0 auto 32px;
+      margin: 0 auto 24px;
     }
     .album-art {
       width: 100%;
@@ -352,7 +352,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      margin-bottom: 28px;
+      margin-bottom: 24px;
     }
     .progress-bar-bg {
       width: 100%;
@@ -385,7 +385,7 @@
       justify-content: center;
       gap: 24px;
       width: 100%;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
 
     .ctrl-btn {
@@ -424,6 +424,25 @@
     .play-btn-big:active { transform: scale(0.93); box-shadow: 0 0 16px var(--glow); }
     .play-btn-big svg { width: 32px; height: 32px; fill: #fff; }
 
+    /* PiP Button */
+    .pip-btn {
+      background: rgba(124, 58, 237, 0.1);
+      border: 1px dashed var(--accent);
+      border-radius: var(--radius-full);
+      padding: 8px 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent2);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 24px;
+      transition: all 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .pip-btn:active { background: var(--accent); color: #fff; }
+
     /* Back to playlist */
     .back-btn {
       background: var(--surface);
@@ -443,8 +462,9 @@
     .back-btn:active { border-color: var(--accent); color: var(--text); }
     .back-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
-    /* ── Hidden iframe ────────────────────────────────────── */
+    /* ── Hidden elements ──────────────────────────────────── */
     #yt-iframe { display: none; }
+    #pip-elements-wrap { position: absolute; top: -9999px; left: -9999px; visibility: hidden; }
 
     /* ── Status / Toast ───────────────────────────────────── */
     #status-toast {
@@ -495,7 +515,7 @@
 
     /* ── Responsive tweaks ───────────────────────────────── */
     @media (max-height: 700px) {
-      .ambient-art { max-width: 240px; margin-bottom: 20px; }
+      .ambient-art { max-width: 240px; margin-bottom: 16px; }
       .now-playing-title { font-size: 18px; }
       .play-btn-big { width: 64px; height: 64px; }
     }
@@ -510,7 +530,6 @@
 
 <div class="app">
 
-  <!-- ══ SETUP SCREEN ══════════════════════════════════════════ -->
   <div id="setup-screen">
 
     <div class="logo-row">
@@ -520,18 +539,16 @@
       <span class="logo-text">YT Playlist <span>Player</span></span>
     </div>
 
-    <!-- Backend URL -->
     <div class="field-wrap">
       <div class="section-label">バックエンド URL（Render）</div>
       <div class="backend-row">
         <span class="backend-label">API エンドポイント</span>
-        <input type="url" id="backend-url"
+        <input type="https://yt-backend-hmam.onrender.com/" id="backend-https://yt-backend-hmam.onrender.com/"
           placeholder="https://your-app.onrender.com"
           value="https://yt-backend-hmam.onrender.com" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
       </div>
     </div>
 
-    <!-- Playlist URL -->
     <div class="field-wrap">
       <div class="section-label">YouTube プレイリスト</div>
       <div class="input-row">
@@ -542,7 +559,6 @@
       </div>
     </div>
 
-    <!-- Track list -->
     <div id="track-list-wrap">
       <div class="section-label">
         トラック一覧
@@ -556,11 +572,7 @@
       </button>
     </div>
 
-  </div><!-- /setup-screen -->
-
-
-  <!-- ══ PLAYER SCREEN ══════════════════════════════════════════ -->
-  <div id="player-screen">
+  </div><div id="player-screen">
 
     <div class="ambient-art" id="art-wrap">
       <div class="pulse-ring" id="pulse-ring"></div>
@@ -599,19 +611,23 @@
       </button>
     </div>
 
+    <button class="pip-btn" id="pip-btn" onclick="togglePiP()">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
+      「ながら聴き」PiP窓を開く
+    </button>
+
     <button class="back-btn" onclick="showSetup()">
       <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
       プレイリストに戻る
     </button>
 
-  </div><!-- /player-screen -->
+  </div></div><div id="pip-elements-wrap">
+  <canvas id="pip-canvas" width="480" height="480"></canvas>
+  <video id="pip-video" autoplay loop muted playsinline></video>
+</div>
 
-</div><!-- /app -->
-
-<!-- Hidden YT iframe (required for IFrame API) -->
 <div id="yt-iframe"></div>
 
-<!-- Toast -->
 <div id="status-toast"></div>
 
 
@@ -626,6 +642,13 @@ let isPlaying  = false;
 let progressTimer = null;
 let mediaSessionActive = false;
 
+// PiP Hack State
+let canvasStream = null;
+let canvasCtx = null;
+let pipAnimId = null;
+let currentJacketImg = new Image();
+currentJacketImg.crossOrigin = "anonymous"; // Avoid tainted canvas
+
 const BACKEND_KEY  = 'yt_pwa_backend';
 const PLAYLIST_KEY = 'yt_pwa_playlist';
 const LAST_URL_KEY = 'yt_pwa_last_url';
@@ -634,7 +657,6 @@ const LAST_URL_KEY = 'yt_pwa_last_url';
    Init
 ═══════════════════════════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', () => {
-  // Restore saved values
   const savedBackend  = localStorage.getItem(BACKEND_KEY);
   const savedUrl      = localStorage.getItem(LAST_URL_KEY);
   const savedPlaylist = localStorage.getItem(PLAYLIST_KEY);
@@ -648,7 +670,10 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch(e) {}
   }
 
-  // Register Service Worker
+  // Setup Hidden Canvas for PiP Engine
+  const canvas = document.getElementById('pip-canvas');
+  canvasCtx = canvas.getContext('2d');
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
@@ -778,6 +803,7 @@ function onPlayerReady(e) {
   updateNowPlaying();
   setupMediaSession();
   startProgressTimer();
+  startCanvasAnimation(); // PiP用のアニメーション描画を開始
 }
 
 function onPlayerStateChange(e) {
@@ -862,7 +888,11 @@ function updateNowPlaying() {
   document.getElementById('now-index').textContent =
     `${currentIdx + 1} / ${playlist.length}`;
 
-  // Album art
+  // サーバーのプロキシを経由してCORS制限を回避した画像をCanvas用にセット
+  const backendUrl = document.getElementById('backend-url').value.trim().replace(/\/$/, '');
+  currentJacketImg.src = `${backendUrl}/api/proxy-img?url=${encodeURIComponent(t.thumbnail)}`;
+
+  // Main UI Album art
   const img  = document.getElementById('album-art');
   const ph   = document.getElementById('art-placeholder');
   if (t.thumbnail) {
@@ -948,6 +978,110 @@ function updateMediaSessionMeta() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   🌟 PiP (Picture-in-Picture) Engine Hack Logic
+═══════════════════════════════════════════════════════════════ */
+function startCanvasAnimation() {
+  if (pipAnimId) cancelAnimationFrame(pipAnimId);
+  
+  let wavePhase = 0;
+
+  function draw() {
+    pipAnimId = requestAnimationFrame(draw);
+    if (!canvasCtx) return;
+
+    const ctx = canvasCtx;
+    const w = 480;
+    const h = 480;
+
+    // 1. 背景の描画（濃いサイバー空間風のグラデーション）
+    let grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#0a0a14');
+    grad.addColorStop(1, '#121225');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // 2. ジャケット画像の描画（読み込み完了時のみ）
+    if (currentJacketImg.complete && currentJacketImg.naturalWidth !== 0) {
+      ctx.save();
+      // 角丸のクリッピングマスクを適用
+      ctx.beginPath();
+      ctx.roundRect(90, 40, 300, 300, 16);
+      ctx.clip();
+      ctx.drawImage(currentJacketImg, 90, 40, 300, 300);
+      ctx.restore();
+    } else {
+      // 画像がない場合のダミープレースホルダー
+      ctx.fillStyle = '#1e1e38';
+      ctx.beginPath();
+      ctx.roundRect(90, 40, 300, 300, 16);
+      ctx.fill();
+    }
+
+    // 3. 曲名の描画（スクロール、または中央切り出し）
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    const titleText = playlist[currentIdx] ? playlist[currentIdx].title : '読み込み中...';
+    // 長すぎる文字をカット
+    const shortTitle = titleText.length > 24 ? titleText.substring(0, 22) + '...' : titleText;
+    ctx.fillText(shortTitle, w / 2, 380);
+
+    // 4. 動く疑似オーディオ波形の描画 (PiP窓が静止画動画扱いでブラウザに止められるのを防ぐ必須処理)
+    if (isPlaying) wavePhase += 0.08;
+    ctx.strokeStyle = '#a855f7';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 40; i <= 440; i += 8) {
+      // 音楽が鳴っている時は波を大きく、止まっている時は小さく
+      const amp = isPlaying ? 15 : 2;
+      const waveY = 430 + Math.sin(i * 0.05 + wavePhase) * Math.cos(i * 0.02 + wavePhase) * amp;
+      if (i === 40) ctx.moveTo(i, waveY);
+      else ctx.lineTo(i, waveY);
+    }
+    ctx.stroke();
+  }
+  
+  draw();
+}
+
+async function togglePiP() {
+  const video = document.getElementById('pip-video');
+  const canvas = document.getElementById('pip-canvas');
+  const btn = document.getElementById('pip-btn');
+
+  if (!document.pictureInPictureEnabled) {
+    showToast('お使いのブラウザはPiP機能をサポートしていません', 'error');
+    return;
+  }
+
+  try {
+    // PiPが既に起動している場合は閉じる
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg> 「ながら聴き」PiP窓を開く`;
+      showToast('PiP窓を閉じました', 'success');
+      return;
+    }
+
+    // Canvasから映像ストリーム（秒間25フレーム）を生成し、隠しVideoに流し込む
+    if (!canvasStream) {
+      canvasStream = canvas.captureStream(25);
+      video.srcObject = canvasStream;
+      await video.play();
+    }
+
+    // 動画プレイヤーに対してPiP（ポップアップ窓）化を要求
+    await video.requestPictureInPicture();
+    
+    btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M19 11h-8v6h8v-6zm4-7v14c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h18c1.1 0 2 .9 2 2zm-2 14V4H3v14h18z"/></svg> PiP窓を閉じる`;
+    showToast('PiP窓を起動しました！ブラウザを閉じても流れます', 'success');
+
+  } catch (err) {
+    showToast('PiP起動失敗: ' + err.message, 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Toast
 ═══════════════════════════════════════════════════════════════ */
 let toastTimer = null;
@@ -978,7 +1112,6 @@ function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
-
 
 </body>
 </html>
