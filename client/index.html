@@ -443,6 +443,31 @@
     .back-btn:active { border-color: var(--accent); color: var(--text); }
     .back-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
+    /* ── PiP button ───────────────────────────────────────── */
+    .pip-btn {
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-full);
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent2);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+      margin-bottom: 12px;
+      font-family: var(--font-body);
+    }
+    .pip-btn:active {
+      background: rgba(124,58,237,0.18);
+      box-shadow: 0 0 16px var(--glow);
+    }
+    .pip-btn svg { width: 16px; height: 16px; fill: currentColor; flex-shrink: 0; }
+    .pip-btn:disabled { opacity: 0.3; cursor: not-allowed; border-color: var(--border); color: var(--muted); }
+
     /* ── Hidden iframe ────────────────────────────────────── */
     #yt-iframe { display: none; }
 
@@ -493,6 +518,18 @@
       margin: 4px 0;
     }
 
+    /* ── PiP hidden canvas & video ────────────────────────── */
+    #pip-canvas,
+    #pip-video {
+      position: absolute;
+      top: -9999px;
+      left: -9999px;
+      width: 512px;
+      height: 512px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
     /* ── Responsive tweaks ───────────────────────────────── */
     @media (max-height: 700px) {
       .ambient-art { max-width: 240px; margin-bottom: 20px; }
@@ -527,7 +564,8 @@
         <span class="backend-label">API エンドポイント</span>
         <input type="url" id="backend-url"
           placeholder="https://your-app.onrender.com"
-          value="" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+          value="https://yt-backend-hmam.onrender.com"
+          autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
       </div>
     </div>
 
@@ -599,6 +637,14 @@
       </button>
     </div>
 
+    <!-- PiP button (between controls and back-btn) -->
+    <button class="pip-btn" id="pip-btn" onclick="openPiP()">
+      <svg viewBox="0 0 24 24">
+        <path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/>
+      </svg>
+      「ながら聴き」PiP窓を開く
+    </button>
+
     <button class="back-btn" onclick="showSetup()">
       <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
       プレイリストに戻る
@@ -613,6 +659,10 @@
 
 <!-- Toast -->
 <div id="status-toast"></div>
+
+<!-- PiP: hidden canvas & video (positioned off-screen) -->
+<canvas id="pip-canvas" width="512" height="512"></canvas>
+<video  id="pip-video"  width="512" height="512" playsinline muted></video>
 
 
 <script>
@@ -630,6 +680,19 @@ const BACKEND_KEY  = 'yt_pwa_backend';
 const PLAYLIST_KEY = 'yt_pwa_playlist';
 const LAST_URL_KEY = 'yt_pwa_last_url';
 
+const DEFAULT_BACKEND = 'https://yt-backend-hmam.onrender.com';
+
+/* ═══════════════════════════════════════════════════════════════
+   PiP state
+═══════════════════════════════════════════════════════════════ */
+let pipCanvas       = null;
+let pipCtx          = null;
+let pipVideo        = null;
+let pipRafId        = null;       // requestAnimationFrame handle
+let pipThumbImg     = null;       // current thumbnail Image object
+let pipThumbLoaded  = false;
+let pipWaveOffset   = 0;          // animation phase for waveform
+
 /* ═══════════════════════════════════════════════════════════════
    Init
 ═══════════════════════════════════════════════════════════════ */
@@ -639,8 +702,11 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedUrl      = localStorage.getItem(LAST_URL_KEY);
   const savedPlaylist = localStorage.getItem(PLAYLIST_KEY);
 
-  if (savedBackend)  document.getElementById('backend-url').value  = savedBackend;
-  if (savedUrl)      document.getElementById('playlist-url').value = savedUrl;
+  // Default backend URL — use saved value if present, else default constant
+  document.getElementById('backend-url').value =
+    savedBackend || DEFAULT_BACKEND;
+
+  if (savedUrl) document.getElementById('playlist-url').value = savedUrl;
   if (savedPlaylist) {
     try {
       playlist = JSON.parse(savedPlaylist);
@@ -652,6 +718,22 @@ window.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+
+  // Init PiP elements
+  pipCanvas = document.getElementById('pip-canvas');
+  pipCtx    = pipCanvas.getContext('2d');
+  pipVideo  = document.getElementById('pip-video');
+
+  // Guard: hide PiP button if not supported
+  if (!document.pictureInPictureEnabled) {
+    const btn = document.getElementById('pip-btn');
+    if (btn) btn.style.display = 'none';
+  }
+
+  // Listen for PiP window close to stop animation loop
+  pipVideo.addEventListener('leavepictureinpicture', () => {
+    stopPipLoop();
+  });
 });
 
 /* ═══════════════════════════════════════════════════════════════
@@ -852,6 +934,9 @@ function setPlaying(flag) {
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = flag ? 'playing' : 'paused';
   }
+
+  // Sync PiP animation: restart loop when playing, keep drawing when paused
+  // (loop always runs while PiP is open; isPlaying controls waveform motion)
 }
 
 function updateNowPlaying() {
@@ -862,7 +947,7 @@ function updateNowPlaying() {
   document.getElementById('now-index').textContent =
     `${currentIdx + 1} / ${playlist.length}`;
 
-  // Album art
+  // Album art (main UI)
   const img  = document.getElementById('album-art');
   const ph   = document.getElementById('art-placeholder');
   if (t.thumbnail) {
@@ -876,6 +961,9 @@ function updateNowPlaying() {
 
   updateTrackHighlight(currentIdx);
   updateMediaSessionMeta();
+
+  // Update PiP thumbnail
+  pipLoadThumb(t.thumbnail);
 }
 
 function showPlayerScreen() {
@@ -976,6 +1064,303 @@ function formatDuration(s) {
 
 function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PiP — Canvas drawing
+═══════════════════════════════════════════════════════════════ */
+
+const PIP_W = 512;
+const PIP_H = 512;
+
+// Artwork area (upper ~72% of canvas = 370px)
+const ART_Y      = 20;
+const ART_SIZE   = 340;
+const ART_X      = (PIP_W - ART_SIZE) / 2;   // 86
+const ART_RADIUS = 20;
+
+// Waveform area (below artwork)
+const WAVE_Y     = ART_Y + ART_SIZE + 16;     // 376
+const WAVE_H     = 60;
+const WAVE_X     = 32;
+const WAVE_W     = PIP_W - 64;
+
+// Title area
+const TITLE_Y    = WAVE_Y + WAVE_H + 16;      // 452
+
+/**
+ * Load thumbnail with crossOrigin=anonymous so canvas stays un-tainted.
+ * YouTube's hqdefault images are served with CORS headers on img.youtube.com.
+ */
+function pipLoadThumb(url) {
+  pipThumbLoaded = false;
+  pipThumbImg    = null;
+
+  if (!url) return;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+
+  img.onload = () => {
+    pipThumbImg    = img;
+    pipThumbLoaded = true;
+  };
+  img.onerror = () => {
+    // CORS blocked or load failed — PiP will show gradient placeholder instead
+    pipThumbImg    = null;
+    pipThumbLoaded = false;
+  };
+
+  // Use img.youtube.com which supports CORS; fall back to original url
+  img.src = url.replace('i.ytimg.com', 'img.youtube.com')
+               .replace('i9.ytimg.com', 'img.youtube.com');
+}
+
+/** Draw one frame onto the PiP canvas */
+function pipDrawFrame() {
+  const ctx = pipCtx;
+  const W   = PIP_W;
+  const H   = PIP_H;
+  const t   = playlist[currentIdx];
+
+  // 1. Background
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, W, H);
+
+  // 2. Artwork
+  ctx.save();
+  // Rounded clip
+  roundRect(ctx, ART_X, ART_Y, ART_SIZE, ART_SIZE, ART_RADIUS);
+  ctx.clip();
+
+  if (pipThumbLoaded && pipThumbImg) {
+    // Cover-fit: compute crop rect so image fills the square
+    const iw = pipThumbImg.naturalWidth  || pipThumbImg.width;
+    const ih = pipThumbImg.naturalHeight || pipThumbImg.height;
+    const scale = Math.max(ART_SIZE / iw, ART_SIZE / ih);
+    const dw    = iw * scale;
+    const dh    = ih * scale;
+    const dx    = ART_X + (ART_SIZE - dw) / 2;
+    const dy    = ART_Y + (ART_SIZE - dh) / 2;
+    try {
+      ctx.drawImage(pipThumbImg, dx, dy, dw, dh);
+    } catch (e) {
+      drawArtPlaceholder(ctx);
+    }
+  } else {
+    drawArtPlaceholder(ctx);
+  }
+  ctx.restore();
+
+  // Subtle border around artwork
+  ctx.save();
+  roundRect(ctx, ART_X, ART_Y, ART_SIZE, ART_SIZE, ART_RADIUS);
+  ctx.strokeStyle = 'rgba(124,58,237,0.45)';
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+  ctx.restore();
+
+  // 3. Waveform / visualizer
+  drawWaveform(ctx);
+
+  // 4. Title text
+  if (t && t.title) {
+    ctx.save();
+    ctx.font         = 'bold 18px -apple-system, Helvetica Neue, sans-serif';
+    ctx.fillStyle    = '#e2e8f0';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    const maxW = W - 48;
+    const text = truncateText(ctx, t.title, maxW);
+    ctx.fillText(text, W / 2, TITLE_Y);
+
+    // Track index sub-label
+    ctx.font      = '13px -apple-system, Helvetica Neue, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(`${currentIdx + 1} / ${playlist.length}`, W / 2, TITLE_Y + 28);
+    ctx.restore();
+  }
+
+  // 5. Playing indicator dot (top-right)
+  if (isPlaying) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(W - 24, 24, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#a855f7';
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** Gradient placeholder when thumbnail unavailable */
+function drawArtPlaceholder(ctx) {
+  const grad = ctx.createLinearGradient(ART_X, ART_Y, ART_X + ART_SIZE, ART_Y + ART_SIZE);
+  grad.addColorStop(0,   '#1a1a2e');
+  grad.addColorStop(0.5, '#16213e');
+  grad.addColorStop(1,   '#0f3460');
+  ctx.fillStyle = grad;
+  ctx.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE);
+
+  // Music note icon (simplified)
+  ctx.fillStyle = 'rgba(226,232,240,0.2)';
+  ctx.font      = '72px -apple-system, sans-serif';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('♪', ART_X + ART_SIZE / 2, ART_Y + ART_SIZE / 2);
+}
+
+/** Animated neon waveform */
+function drawWaveform(ctx) {
+  const barCount = 40;
+  const barW     = Math.floor(WAVE_W / barCount) - 2;
+  const baseY    = WAVE_Y + WAVE_H;
+
+  ctx.save();
+
+  for (let i = 0; i < barCount; i++) {
+    const x = WAVE_X + i * (barW + 2);
+
+    let barH;
+    if (isPlaying) {
+      // Animated: combination of sin waves with different frequencies + slight randomness
+      const phase1 = pipWaveOffset * 0.05 + i * 0.4;
+      const phase2 = pipWaveOffset * 0.03 + i * 0.7;
+      const phase3 = pipWaveOffset * 0.08 + i * 0.2;
+      const norm   = (Math.sin(phase1) + Math.sin(phase2) * 0.6 + Math.sin(phase3) * 0.4);
+      barH = Math.max(4, ((norm + 2) / 4) * WAVE_H);
+    } else {
+      // Paused: flat low bars
+      barH = 4;
+    }
+
+    // Gradient per bar: accent purple → accent2 violet
+    const grad = ctx.createLinearGradient(x, baseY - barH, x, baseY);
+    grad.addColorStop(0, '#a855f7');
+    grad.addColorStop(1, 'rgba(124,58,237,0.3)');
+    ctx.fillStyle = grad;
+
+    // Rounded top
+    const radius = Math.min(barW / 2, 3);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, baseY - barH);
+    ctx.lineTo(x + barW - radius, baseY - barH);
+    ctx.quadraticCurveTo(x + barW, baseY - barH, x + barW, baseY - barH + radius);
+    ctx.lineTo(x + barW, baseY);
+    ctx.lineTo(x, baseY);
+    ctx.lineTo(x, baseY - barH + radius);
+    ctx.quadraticCurveTo(x, baseY - barH, x + radius, baseY - barH);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Glow line beneath bars
+  ctx.strokeStyle = 'rgba(124,58,237,0.25)';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(WAVE_X, baseY + 1);
+  ctx.lineTo(WAVE_X + WAVE_W, baseY + 1);
+  ctx.stroke();
+
+  ctx.restore();
+
+  // Advance animation phase
+  if (isPlaying) pipWaveOffset += 1;
+}
+
+/** Helper: draw rounded rect path (no fill/stroke — caller decides) */
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+/** Truncate text to fit maxWidth, appending '...' */
+function truncateText(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(text.slice(0, mid) + '…').width <= maxW) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo) + '…';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PiP — RAF loop
+═══════════════════════════════════════════════════════════════ */
+function startPipLoop() {
+  if (pipRafId) return; // already running
+  function loop() {
+    pipDrawFrame();
+    pipRafId = requestAnimationFrame(loop);
+  }
+  pipRafId = requestAnimationFrame(loop);
+}
+
+function stopPipLoop() {
+  if (pipRafId) {
+    cancelAnimationFrame(pipRafId);
+    pipRafId = null;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PiP — open
+═══════════════════════════════════════════════════════════════ */
+async function openPiP() {
+  // Guard: browser support
+  if (!document.pictureInPictureEnabled) {
+    showToast('このブラウザは PiP に対応していません', 'error');
+    return;
+  }
+
+  // If already in PiP, just exit (toggle)
+  if (document.pictureInPictureElement) {
+    await document.exitPictureInPicture();
+    return;
+  }
+
+  const btn = document.getElementById('pip-btn');
+  if (btn) { btn.disabled = true; }
+
+  try {
+    // Load current track's thumbnail
+    const t = playlist[currentIdx];
+    if (t && t.thumbnail) pipLoadThumb(t.thumbnail);
+
+    // Draw an initial frame so the video has content before PiP opens
+    pipDrawFrame();
+
+    // Capture canvas as 30fps MediaStream
+    const stream = pipCanvas.captureStream(30);
+    pipVideo.srcObject = stream;
+
+    // Must call play() before requestPictureInPicture (browser requirement)
+    await pipVideo.play();
+
+    // Start the RAF animation loop
+    startPipLoop();
+
+    // Open PiP
+    await pipVideo.requestPictureInPicture();
+
+    showToast('PiP 窓を開きました', 'success');
+  } catch (err) {
+    stopPipLoop();
+    console.error('PiP error:', err);
+    showToast('PiP の起動に失敗しました: ' + (err.message || err), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; }
+  }
 }
 </script>
 
